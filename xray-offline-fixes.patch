@@ -1,0 +1,501 @@
+diff --git a/docs/XRAY_OFFLINE_FIXES.md b/docs/XRAY_OFFLINE_FIXES.md
+new file mode 100644
+index 0000000..ed53a92
+--- /dev/null
++++ b/docs/XRAY_OFFLINE_FIXES.md
+@@ -0,0 +1,64 @@
++# إصلاحات الصور/الأشعة (Offline-first) + توصيات التوسّع
++
++> ملخص تقني للتعديلات على تدفّق تحميل/ضغط/تخزين/رفع الصور المصغّرة والكاملة،
++> مع الحفاظ التام على نمط offline-first وعدم تعطيل أي ميزة قائمة.
++
++## 1) الأسباب الجذرية (Root Cause Analysis)
++
++### أ) الأيقونة الحمراء / "كسر" الصور المصغّرة بعد تسجيل الدخول (خصوصًا على جهاز آخر أو بعد حذف التطبيق)
++- المفتاح `key` فقط هو ما يُحفَظ ويُزامَن في `config.patientXrays` (عبر Supabase). أمّا البكسلات
++  فتوجد إمّا على R2 (أونلاين) أو في IndexedDB (`thumbnails` + `xrayFallback`).
++- عند الدخول من جهاز جديد/بعد الخروج، تكون IndexedDB فارغة، فيجب استعادة المصغّرة من R2.
++- آلية `restoreThumbnailFromR2` كانت تعلّم المفتاح كـ"فاشل" (`_failedKeys`) بعد عدد محاولات،
++  وبعدها لا يُعاد تشغيل الاستعادة تلقائيًا (إلا بإعادة رسم نادرة) حتى لو رجع النت أو جهز التوكن.
++  السبب الشائع للفشل المبكر: التوكن لم يجهز بعد مباشرةً بعد الدخول، أو انقطاع لحظي.
++  النتيجة: تبقى الأيقونة الحمراء عالقة بدل المصغّرة الحقيقية.
++
++### ب) "حذف" الصور عند التصغير/الخروج ثم الرجوع (الإحساس بـ mock/رفع وهمي)
++- داخل الجلسة، الصور تُحفظ فعليًا في IndexedDB. لكن عند العودة من الخلفية (cold resume)
++  تكون ذاكرة `_imageCache` فارغة، فإذا فشلت الاستعادة (نفس مشكلة العلامة الحمراء) تظهر الصور
++  وكأنها "حُذِفت".
++- الرفع قد يسقط بصمت إلى وضع "مُجدوَل" (queued) عند فشل R2، بينما يرى المستخدم نجاحًا ظاهريًا —
++  فتبقى الصورة محليّة فقط. مقترنًا بمسح الخروج ⇒ فقدان دائم.
++
++### ج) كسر الصور بعد تسجيل الخروج ثم الدخول
++- `clearXrayLocalData()` عند الخروج كان يمسح `thumbnails` و`xrayFallback` و`pendingUploads` معًا.
++  - الصور **المُجدوَلة** (لم تُرفع بعد) ليست على R2 ⇒ مسحها = فقدان نهائي.
++  - الصور المرفوعة: بعد الدخول يجب استعادتها من R2؛ ومع هشاشة الاستعادة كانت تظهر حمراء.
++
++## 2) التعديلات المطبّقة (بدون كسر offline-first)
++
++السلوك المطلوب الذي اعتمدناه (حسب توضيح المستخدم):
++**التخزين في IndexedDB يبقى حتى تسجيل الخروج فقط، ثم يُمسح للخصوصية، مع استعادة موثوقة من R2 بعد الدخول.**
++
++1. **استعادة موثوقة للمصغّرات (لا أيقونة حمراء):** `src/services/image.service.js`
++   - `retryFailedThumbnails()` جديدة تمسح أعلام الفشل وتعيد المحاولة.
++   - تُستدعى تلقائيًا عند عودة التطبيق للواجهة (`visibilitychange → visible`) وعند عودة الاتصال (`window 'online'`).
++   - في `getThumbnailUrl`: إذا كان المفتاح "فاشلًا" سابقًا ونحن الآن أونلاين، يُعاد ضبطه ليُعاد جلبه من R2.
++
++2. **عدم فقدان أي صورة عند الخروج:** `clearXrayLocalData()`
++   - قبل المسح: محاولة `uploadAllPending()` (إن كان هناك اتصال) لرفع كل الصور المُجدوَلة إلى R2.
++   - لا تُمسح `pendingUploads` إلا إذا أصبح عددها صفرًا (أي تأكّد رفعها). إن بقي شيء (أوفلاين/فشل)
++     يُحتفظ به لحفظ سلامة صور الأشعة الطبية.
++   - تبقى مصغّرات/نُسخ العرض المحلية تُمسح كالمعتاد (خصوصية).
++
++3. **زر التنزيل داخل العارض:** `src/components/XrayViewer.vue`
++   - أيقونة تنزيل بنفس الهوية البصرية في شريط العارض.
++   - تُجهّز الصورة الكاملة (من IndexedDB أو R2 عبر `getImageSecure`) وتنزّلها:
++     على الويب عبر رابط تنزيل، وعلى التطبيق الأصلي (Capacitor) عبر مشاركة النظام إن توفّرت.
++
++## 3) توصيات التوسّع إلى 100–500 ألف مستخدم بأقل تكلفة (مع أمان لكل مستخدم)
++
++### الأمان (الأهم — يجب التحقق منه في Worker)
++- مفاتيح الصور مُعرَّفة بالمستخدم: `xray/{uid}/{patientName}/{ts}_{file}`.
++- **يجب** أن يتحقّق Cloudflare Worker أن `sub` في JWT يساوي `{uid}` في المسار في كل من
++  `GET /image`، `POST /upload`، `DELETE /image`. وإلا يمكن لأي مستخدم مُصدَّق قراءة صور غيره بتخمين المفتاح.
++
++### التكلفة/الأداء
++- **مصغّرات من جهة الخادم:** توليد مصغّرة (≤200KB) في Worker وقت الرفع وتخزينها بمفتاح `thumb/...`،
++  بحيث يجلب التطبيق المصغّرة الصغيرة بدل الصورة الكاملة عند الاستعادة (أرخص نقلًا وأسرع). أو استخدام Cloudflare Images.
++- **Cache:** الاستفادة من Cache API / حواف Cloudflare للمصغّرات (immutable, مفاتيح فريدة) لتقليل قراءات R2.
++- **روابط موقّعة قصيرة العمر** بدل تمرير الـ JWT للصور إن رغبتم بفصل صلاحية الوصول.
++- **تخزين IndexedDB كـ Blob** بدل data URL (base64) لتقليل الحجم ~33% وتفادي تجاوز الحصّة عند كثرة الصور
++  (تحسين مستقبلي يقلّل أعطال الكتابة على الأجهزة منخفضة السعة).
++- R2 لا يفرض رسوم خروج (egress)، وهو مناسب اقتصاديًا لهذا الحجم؛ التكلفة الأساسية تخزين + عمليات.
+diff --git a/src/assets/styles/main.css b/src/assets/styles/main.css
+index 2f35cdc..035a4ee 100644
+--- a/src/assets/styles/main.css
++++ b/src/assets/styles/main.css
+@@ -308,6 +308,7 @@ body.light .fab-add{box-shadow:0 6px 24px rgba(59,130,246,.25)}
+ .xray-bar .xb-btn{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);color:#dde4f0;border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px;transition:background .2s}
+ .xray-bar .xb-btn:hover{background:rgba(255,255,255,.18)}
+ .xray-bar .xb-btn.xb-del{border-color:rgba(255,68,85,.3);color:#f87171}
++.xray-bar .xb-btn:disabled,.xray-bar .xb-btn.xb-busy{opacity:.55;cursor:default}
+ .xray-body{flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:8px;position:relative;touch-action:none}
+ .xray-body img{max-width:100%;max-height:100%;object-fit:contain;transition:transform .2s;cursor:grab;border-radius:6px}
+ .xray-body img.xr-zoomed{cursor:move;max-width:none;max-height:none}
+@@ -334,6 +335,10 @@ body.light .fab-add{box-shadow:0 6px 24px rgba(59,130,246,.25)}
+ .xray-spinner{position:absolute;width:36px;height:36px;border:3px solid rgba(59,130,246,.15);border-top-color:var(--gold);border-radius:50%;animation:xraySpin .8s linear infinite}
+ @keyframes xraySpin{to{transform:rotate(360deg)}}
+ .xray-img-hidden{opacity:0;position:absolute}
++.xray-retry-box{position:absolute;display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px 20px;background:rgba(10,20,40,.85);border:1px solid rgba(59,130,246,.25);border-radius:12px}
++.xray-retry-msg{color:#dde4f0;font-size:13px}
++.xray-retry-btn{background:linear-gradient(135deg,var(--blue,#3b82f6),var(--blue-d,#2563eb));color:#fff;border:none;border-radius:10px;padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer}
++.xray-retry-btn:hover{filter:brightness(1.08)}
+ 
+ /* Skeleton placeholder for gallery thumbnails */
+ .xray-thumb-skeleton{width:52px;height:52px;border-radius:8px;background:linear-gradient(110deg,rgba(59,130,246,.06) 30%,rgba(59,130,246,.12) 50%,rgba(59,130,246,.06) 70%);background-size:200% 100%;animation:xrayShimmer 1.5s ease-in-out infinite;border:1px solid rgba(255,255,255,.05)}
+diff --git a/src/components/XrayViewer.vue b/src/components/XrayViewer.vue
+index 6b41f16..7a0dbf8 100644
+--- a/src/components/XrayViewer.vue
++++ b/src/components/XrayViewer.vue
+@@ -7,6 +7,10 @@
+           {{ patientName }} — أشعة {{ currentIdx + 1 }}/{{ images.length }}
+         </div>
+         <div class="xb-btns">
++          <button class="xb-btn" :class="{ 'xb-busy': downloading }" @click="downloadCurrent" title="تنزيل الصورة" :disabled="downloading">
++            <svg v-if="!downloading" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
++            <svg v-else class="animate-spin" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
++          </button>
+           <button class="xb-btn xb-del" @click="deleteCurrent" title="حذف">
+             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+           </button>
+@@ -14,12 +18,19 @@
+         </div>
+       </div>
+       <div class="xray-body" ref="bodyEl" @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @wheel.prevent="onWheel" @touchstart.prevent="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd">
+-        <div v-if="imgLoading || !currentSrc" class="xray-loading">
++        <div v-if="imgError" class="xray-loading xray-error">
++          <img v-if="thumbSrc" :src="thumbSrc" :alt="patientName + ' أشعة'" class="xray-preview-blur" :style="imgStyle">
++          <div class="xray-retry-box">
++            <span class="xray-retry-msg">تعذّر تحميل الصورة</span>
++            <button class="xray-retry-btn" @click="retryLoad">إعادة المحاولة</button>
++          </div>
++        </div>
++        <div v-else-if="imgLoading || !currentSrc" class="xray-loading">
+           <img v-if="thumbSrc" :src="thumbSrc" :alt="patientName + ' أشعة'" class="xray-preview-blur" :style="imgStyle">
+           <div class="xray-spinner"></div>
+         </div>
+         <!-- FIX: only render img when src is non-empty — avoids immediate error event on empty src -->
+-        <img v-if="currentSrc" ref="imgEl" :src="currentSrc" :alt="patientName + ' أشعة'" :style="imgStyle" draggable="false" @load="onImageLoad" @error="onImageError" :class="{ 'xray-img-hidden': imgLoading }">
++        <img v-if="currentSrc" ref="imgEl" :src="currentSrc" :alt="patientName + ' أشعة'" :style="imgStyle" draggable="false" @load="onImageLoad" @error="onImageError" :class="{ 'xray-img-hidden': imgLoading || imgError }">
+       </div>
+       <div class="xray-tools">
+         <button class="xt-btn" @click="zoomIn">🔍+</button>
+@@ -40,9 +51,10 @@
+ </template>
+ 
+ <script setup>
+-import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
+-import { getImageUrl, getThumbnailUrl, xrayVersion } from '@/services/image.service'
++import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
++import { getImageUrl, getImageSecure, getImagePersistent, getThumbnailUrl, xrayVersion } from '@/services/image.service'
+ import { preloadAdjacent } from '@/services/image-pipeline.service'
++import { useToast } from '@/composables/useToast'
+ 
+ const props = defineProps({
+   visible: { type: Boolean, default: false },
+@@ -52,10 +64,17 @@ const props = defineProps({
+ })
+ const emit = defineEmits(['close', 'delete'])
+ 
++const { toast } = useToast()
++
+ const bodyEl = ref(null)
+ const imgEl = ref(null)
+ const currentIdx = ref(0)
+ const imgLoading = ref(false)
++const imgError = ref(false)
++const activeSrc = ref('')
++const downloading = ref(false)
++let _loadSeq = 0
++let _loadTimer = null
+ 
+ const st = reactive({
+   zoom: 1, rotate: 0, invert: false,
+@@ -68,7 +87,7 @@ watch(() => props.visible, (v) => {
+   if (v) {
+     currentIdx.value = Math.min(props.startIndex, props.images.length - 1)
+     resetState()
+-    imgLoading.value = true
++    loadCurrent()
+     document.body.style.overflow = 'hidden'
+     preloadAdjacent(props.images, currentIdx.value, imgSrc)
+     history.pushState({ xray: true }, '')
+@@ -79,7 +98,12 @@ watch(() => props.visible, (v) => {
+     if (_popHandler) { window.removeEventListener('popstate', _popHandler); _popHandler = null }
+   }
+ })
+-onBeforeUnmount(() => { if (_popHandler) { window.removeEventListener('popstate', _popHandler); _popHandler = null } })
++onBeforeUnmount(() => {
++  if (_popHandler) { window.removeEventListener('popstate', _popHandler); _popHandler = null }
++  document.removeEventListener('visibilitychange', _onVis)
++  if (_loadTimer) { clearTimeout(_loadTimer); _loadTimer = null }
++  try { _appResumeHandle?.remove?.() } catch { /* ignore */ }
++})
+ 
+ function resetState() {
+   st.zoom = 1; st.rotate = 0; st.invert = false
+@@ -93,13 +117,71 @@ function imgSrc(im) {
+ }
+ 
+ function thumbStripSrc(im) {
++  void xrayVersion.value // re-evaluate strip when a thumbnail finishes restoring
+   if (typeof im === 'string') return im.startsWith('http') || im.startsWith('data:') ? im : getThumbnailUrl(im)
+   return im.url || (im.key ? getThumbnailUrl(im.key) : '') || im.src || ''
+ }
+ 
+-const currentSrc = computed(() => {
+-  void xrayVersion.value
+-  return props.images[currentIdx.value] ? imgSrc(props.images[currentIdx.value]) : ''
++const currentSrc = computed(() => activeSrc.value)
++
++// Deterministically resolve the current image: cache → IndexedDB → R2 (persisted).
++// Guarantees the spinner ends (success or a retry affordance) instead of hanging
++// forever after the app is minimized/resumed and the in-memory cache is gone.
++async function loadCurrent() {
++  const seq = ++_loadSeq
++  const im = props.images[currentIdx.value]
++  imgError.value = false
++  if (_loadTimer) { clearTimeout(_loadTimer); _loadTimer = null }
++  if (!im) { activeSrc.value = ''; imgLoading.value = false; return }
++
++  // Direct sources (http/data/blob already attached) need no resolution.
++  const direct = typeof im === 'string'
++    ? (im.startsWith('http') || im.startsWith('data:') ? im : '')
++    : (im.url || im.src || '')
++  if (direct) { activeSrc.value = direct; imgLoading.value = true; return }
++
++  const key = typeof im === 'string' ? im : im?.key
++  if (!key) { activeSrc.value = ''; imgLoading.value = false; imgError.value = true; return }
++
++  imgLoading.value = true
++  // Safety timeout: never spin forever — surface a retry button if R2 stalls.
++  _loadTimer = setTimeout(() => {
++    if (seq === _loadSeq && imgLoading.value && !activeSrc.value) {
++      imgLoading.value = false
++      imgError.value = true
++    }
++  }, 15000)
++
++  let url = ''
++  try { url = await getImagePersistent(key) } catch { url = '' }
++  if (seq !== _loadSeq) return
++  if (_loadTimer) { clearTimeout(_loadTimer); _loadTimer = null }
++  if (url) {
++    activeSrc.value = url
++  } else {
++    activeSrc.value = ''
++    imgLoading.value = false
++    imgError.value = true
++  }
++}
++
++function retryLoad() { loadCurrent() }
++
++// Re-resolve the open image when returning from background (web + native).
++function _onResume() {
++  if (!props.visible) return
++  if (!activeSrc.value || imgError.value) loadCurrent()
++}
++function _onVis() { if (document.visibilityState === 'visible') _onResume() }
++let _appResumeHandle = null
++onMounted(() => {
++  document.addEventListener('visibilitychange', _onVis)
++  if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()) {
++    import('@capacitor/app').then(({ App }) => {
++      App.addListener('appStateChange', ({ isActive }) => { if (isActive) _onResume() })
++        .then(h => { _appResumeHandle = h })
++    }).catch(() => {})
++  }
+ })
+ 
+ const imgStyle = computed(() => ({
+@@ -124,6 +206,7 @@ function applyPanLimit() {
+ 
+ // Thumbnail source for progressive loading blur placeholder
+ const thumbSrc = computed(() => {
++  void xrayVersion.value
+   const img = props.images[currentIdx.value]
+   if (!img) return ''
+   if (typeof img === 'string') return img.startsWith('http') || img.startsWith('data:') ? '' : getThumbnailUrl(img)
+@@ -132,16 +215,18 @@ const thumbSrc = computed(() => {
+ 
+ function onImageLoad() {
+   imgLoading.value = false
++  imgError.value = false
+ }
+ 
+ function onImageError() {
+   imgLoading.value = false
++  imgError.value = true
+ }
+ 
+ function goTo(i) {
+   currentIdx.value = i
+   resetState()
+-  imgLoading.value = true
++  loadCurrent()
+   preloadAdjacent(props.images, i, imgSrc)
+ }
+ 
+@@ -225,6 +310,66 @@ function close() {
+   emit('close')
+ }
+ 
++async function resolveFullBlob(im) {
++  // Prefer an already-resolved src (data URL / blob URL / http) from the viewer,
++  // otherwise fall back to the secure resolver which returns local IndexedDB data
++  // when available or fetches the full image from R2.
++  let src = imgSrc(im)
++  if (!src) {
++    const key = typeof im === 'string' ? im : im?.key
++    if (key && !key.startsWith('http') && !key.startsWith('data:')) {
++      src = await getImageSecure(key)
++    }
++  }
++  if (!src) return null
++  const res = await fetch(src)
++  if (!res.ok) return null
++  return res.blob()
++}
++
++async function downloadCurrent() {
++  if (downloading.value) return
++  const im = props.images[currentIdx.value]
++  if (!im) return
++  downloading.value = true
++  try {
++    const blob = await resolveFullBlob(im)
++    if (!blob || !blob.size) { toast('تعذّر تجهيز الصورة للتنزيل'); return }
++    const ext = (blob.type && blob.type.includes('png')) ? 'png' : 'jpg'
++    const safeName = (props.patientName || 'اشعة').replace(/[\\/:*?"<>|]+/g, '_')
++    const filename = `${safeName}-${currentIdx.value + 1}.${ext}`
++
++    // On native (Capacitor WebView) prefer the share sheet so the user can save
++    // to the gallery / files; fall back to a normal browser download elsewhere.
++    const file = new File([blob], filename, { type: blob.type || 'image/jpeg' })
++    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()
++    if (isNative && navigator.canShare && navigator.canShare({ files: [file] })) {
++      try {
++        await navigator.share({ files: [file], title: filename })
++        return
++      } catch (e) {
++        if (e?.name === 'AbortError') return // user cancelled
++        // otherwise fall through to anchor download
++      }
++    }
++
++    const url = URL.createObjectURL(blob)
++    const a = document.createElement('a')
++    a.href = url
++    a.download = filename
++    a.rel = 'noopener'
++    document.body.appendChild(a)
++    a.click()
++    a.remove()
++    setTimeout(() => { try { URL.revokeObjectURL(url) } catch { /* ignore */ } }, 5000)
++    toast('تم تنزيل الصورة')
++  } catch {
++    toast('تعذّر تنزيل الصورة')
++  } finally {
++    downloading.value = false
++  }
++}
++
+ function deleteCurrent() {
+   if (!confirm('حذف هذه الصورة؟')) return
+   emit('delete', currentIdx.value)
+diff --git a/src/services/image.service.js b/src/services/image.service.js
+index fa5246a..130cbad 100644
+--- a/src/services/image.service.js
++++ b/src/services/image.service.js
+@@ -191,6 +191,22 @@ export function getTrackedBlobCount() {
+   return _trackedBlobs.size
+ }
+ 
++/**
++ * Clear the "failed" flags for thumbnails so the next render re-attempts a
++ * restore from R2. Called when the app regains focus or connectivity — this
++ * is what turns a stale red "broken image" icon back into a real thumbnail
++ * once the network/token becomes available again.
++ */
++export function retryFailedThumbnails() {
++  if (!_failedKeys.size && !_retryCount.size) {
++    xrayVersion.value++
++    return
++  }
++  _failedKeys.clear()
++  _retryCount.clear()
++  xrayVersion.value++
++}
++
+ if (typeof document !== 'undefined') {
+   document.addEventListener('visibilitychange', () => {
+     if (document.visibilityState === 'hidden' && _trackedBlobs.size > MAX_CACHE_SIZE) {
+@@ -205,13 +221,73 @@ if (typeof document !== 'undefined') {
+         }
+       }
+     }
+-    // FIX: when app returns to foreground, bump version so Vue re-evaluates all image sources
++    // FIX: when app returns to foreground, re-evaluate image sources AND clear any
++    // stale failure flags so thumbnails that failed while backgrounded/offline retry.
+     if (document.visibilityState === 'visible') {
+-      xrayVersion.value++
++      retryFailedThumbnails()
+     }
+   })
+ }
+ 
++if (typeof window !== 'undefined') {
++  // When connectivity returns, drop failure flags so broken thumbnails retry from R2.
++  window.addEventListener('online', () => {
++    retryFailedThumbnails()
++  })
++}
++
++// On native (Capacitor) Android the WebView is paused, not just hidden — the
++// `visibilitychange` event is not always reliable. Hook the App resume event so
++// returning to the foreground re-attempts any failed restores.
++if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()) {
++  import('@capacitor/app').then(({ App }) => {
++    App.addListener('appStateChange', ({ isActive }) => {
++      if (isActive) retryFailedThumbnails()
++    })
++    App.addListener('resume', () => retryFailedThumbnails())
++  }).catch(() => { /* plugin unavailable — visibilitychange still covers web */ })
++}
++
++/**
++ * Awaitable, persistent full-image resolver used by the viewer.
++ * Order: in-memory cache → IndexedDB (xrayFallback) → R2 (then saved to IDB so
++ * it survives app minimize/close until logout). Returns a URL string or ''.
++ * Unlike getImageUrl (fire-and-forget) this lets the UI await a definite result
++ * and show a retry affordance instead of an endless spinner.
++ */
++export async function getImagePersistent(key) {
++  if (!key) return ''
++  if (typeof key === 'string' && (key.startsWith('http') || key.startsWith('data:'))) return key
++  if (_imageCache.has(key)) return _imageCache.get(key)
++
++  const idbData = await getLocalXrayDataAsync(key)
++  if (idbData) {
++    _imageCache.set(key, idbData)
++    _generateThumbIfMissing(key, idbData)
++    return idbData
++  }
++
++  const blobUrl = await fetchImageSecure(key)
++  if (!blobUrl) return ''
++  try {
++    const res = await fetch(blobUrl)
++    const blob = await res.blob()
++    const compressedBlob = await compressImage(blob, 1600, 0.7).catch(() => blob)
++    const dataUrl = await fileToDataUrl(compressedBlob)
++    await saveLocalXrayData(key, dataUrl)
++    _generateThumbIfMissing(key, dataUrl)
++    _failedKeys.delete(key)
++    _retryCount.delete(key)
++    _imageCache.set(key, dataUrl)
++    return dataUrl
++  } catch {
++    // Persisting failed but we can still show this session via the blob URL.
++    _trackBlob(blobUrl)
++    _imageCache.set(key, blobUrl)
++    return blobUrl
++  }
++}
++
+ export function getThumbnailUrl(key) {
+   // Check thumbnail cache first
+   const memCached = _imageCache.get(`thumb:${key}`)
+@@ -224,6 +300,13 @@ export function getThumbnailUrl(key) {
+     return fullCached
+   }
+ 
++  // If this key was previously marked failed but we are back online, give it a
++  // fresh chance instead of leaving a permanent red icon.
++  if (typeof navigator !== 'undefined' && navigator.onLine && _failedKeys.has(key)) {
++    _failedKeys.delete(key)
++    _retryCount.delete(key)
++  }
++
+   // Trigger background restore from R2 (on-demand)
+   restoreThumbnailFromR2(key)
+   return ''
+@@ -540,10 +623,27 @@ export async function deleteXrayImage(key) {
+  * Clear all local thumbnails and xray data (call on logout).
+  */
+ export async function clearXrayLocalData() {
++  // DATA SAFETY: pending uploads are images that exist ONLY on this device (not yet
++  // on R2). Before wiping local data on logout we must flush them to the server,
++  // otherwise they are lost forever. If we are offline (or some uploads still fail)
++  // we KEEP the unsynced pending uploads so the images survive — integrity of a
++  // medical x-ray outweighs clearing it for privacy. Everything that is already on
++  // R2 is removed locally as expected.
++  try {
++    if (typeof navigator === 'undefined' || navigator.onLine !== false) {
++      await uploadAllPending()
++    }
++  } catch { /* best effort — unsynced items stay in the pending store below */ }
++
+   try { await clearAllThumbnails() } catch { /* ignore */ }
+   try { await clearAllXrayFallbacks() } catch { /* ignore */ }
+-  try { await clearPendingUploads() } catch { /* ignore */ }
+-  pendingUploadCount.value = 0
++  // Only clear the pending store if everything was successfully synced to R2.
++  try {
++    const remaining = await getPendingUploadCount()
++    if (remaining === 0) await clearPendingUploads()
++  } catch { /* ignore */ }
++  await refreshPendingCount().catch(() => { pendingUploadCount.value = 0 })
++
+   _imageCache.clear()
+   revokeAllImageBlobs()
+   // FIX: clear all module-level state so the next login session starts clean

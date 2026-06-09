@@ -111,6 +111,77 @@
           </div>
         </div>
 
+        <!-- ═══ GROUP 2.5: نظام الحجز ═══ -->
+        <div class="set-group">
+          <div class="set-group-head" @click="toggle('booking')">
+            <div class="sg-title"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-6"/><path d="M12 8V2"/><rect x="4" y="8" width="16" height="8" rx="2"/></svg> نظام الحجز</div>
+            <span class="sg-arr" :class="{ 'sg-open': openGroups.has('booking') }">▼</span>
+          </div>
+          <div class="set-group-body" :class="openGroups.has('booking') ? 'sg-show' : ''">
+            <div class="set-group-body-inner">
+              <!-- Booking type -->
+              <div class="glass p-4 space-y-3">
+                <span class="sec-h">نوع نظام الحجز</span>
+                <div class="flex gap-2">
+                  <button
+                    class="flex-1 py-2.5 text-xs font-bold rounded-xl transition-all"
+                    :class="localCfg.bookingType !== 'queue' ? 'btn-g' : 'btn-o'"
+                    @click="localCfg.bookingType = 'traditional'; saveSetting('bookingType')"
+                  >النظام التقليدي</button>
+                  <button
+                    class="flex-1 py-2.5 text-xs font-bold rounded-xl transition-all"
+                    :class="localCfg.bookingType === 'queue' ? 'btn-g' : 'btn-o'"
+                    @click="localCfg.bookingType = 'queue'; saveSetting('bookingType')"
+                  >نظام الدور</button>
+                </div>
+                <p class="text-[9px] opacity-35">يمكن التبديل بينهما في أي وقت دون فقدان أي بيانات</p>
+              </div>
+              <!-- Record retention -->
+              <div class="glass p-4 space-y-3">
+                <span class="sec-h">حذف السجلات القديمة تلقائياً</span>
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-[10px] opacity-50">تفعيل الحذف التلقائي</p>
+                  <label class="tgl"><input type="checkbox" v-model="localCfg.retentionEnabled" @change="saveRetention"><span class="tgl-s"></span></label>
+                </div>
+                <div v-if="localCfg.retentionEnabled" class="space-y-3">
+                  <div>
+                    <p class="text-[10px] opacity-50 mb-1">عدد الأيام</p>
+                    <select v-model.number="localCfg.retentionDays" class="inp text-xs w-full" @change="saveRetention">
+                      <option :value="3">3 أيام (افتراضي)</option>
+                      <option :value="7">7 أيام</option>
+                      <option :value="14">14 يوم</option>
+                      <option :value="30">30 يوم</option>
+                      <option :value="0">عدم الحذف</option>
+                    </select>
+                  </div>
+                  <div>
+                    <p class="text-[10px] opacity-50 mb-1">نطاق الحذف</p>
+                    <div class="space-y-2">
+                      <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" :value="false" v-model="localCfg.retentionDeleteCloud" @change="saveRetention" class="accent-blue-500">
+                        <div><span class="text-[11px]">الحذف من الهاتف فقط</span><p class="text-[9px] opacity-35">تبقى السجلات في Supabase</p></div>
+                      </label>
+                      <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="radio" :value="true" v-model="localCfg.retentionDeleteCloud" @change="saveRetention" class="accent-blue-500">
+                        <div><span class="text-[11px]">الحذف من الهاتف والسحابة</span><p class="text-[9px] opacity-35">حذف من الجهاز ومن Supabase معاً</p></div>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Default interval -->
+              <div class="glass p-4 space-y-3">
+                <span class="sec-h">الفاصل الزمني بين المرضى (دقائق)</span>
+                <div class="flex gap-2">
+                  <input type="number" v-model.number="localCfg.queueInterval" class="inp flex-1 text-sm" min="5" max="60" placeholder="15">
+                  <button @click="saveSetting('queueInterval')" class="btn-g px-4 py-2 text-xs">حفظ</button>
+                </div>
+                <p class="text-[9px] opacity-35">يستخدم لحساب الوقت المتوقع تلقائياً (الافتراضي: 15 دقيقة)</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ═══ GROUP 3: الحماية والتأكيدات ═══ -->
         <div class="set-group">
           <div class="set-group-head" @click="toggle('protect')">
@@ -370,6 +441,11 @@ const localCfg = reactive({
   keepTabState: false,
   fabPosition: 'center',
   fabVisible: true,
+  bookingType: 'traditional',
+  retentionEnabled: false,
+  retentionDays: 3,
+  retentionDeleteCloud: false,
+  queueInterval: 15,
 })
 
 watch(() => app.config, (cfg) => {
@@ -394,6 +470,11 @@ watch(() => app.config, (cfg) => {
   localCfg.keepTabState = cfg.keepTabState === true
   localCfg.fabPosition = cfg.fabPosition || 'center'
   localCfg.fabVisible = cfg.fabVisible !== false
+  localCfg.bookingType = cfg.bookingType || 'traditional'
+  localCfg.retentionEnabled = cfg.retentionEnabled === true
+  localCfg.retentionDays = cfg.retentionDays ?? 3
+  localCfg.retentionDeleteCloud = cfg.retentionDeleteCloud === true
+  localCfg.queueInterval = cfg.queueInterval || 15
   logoPreview.value = cfg.logo || ''
   localWaTpls.value = (cfg.waTemplates || []).map(t => ({ ...t }))
 }, { immediate: true, deep: true })
@@ -440,6 +521,14 @@ function saveDcSettings() {
 
 function saveFabSettings() {
   saveAndSync({ fabPosition: localCfg.fabPosition, fabVisible: localCfg.fabVisible })
+}
+
+function saveRetention() {
+  saveAndSync({
+    retentionEnabled: localCfg.retentionEnabled,
+    retentionDays: localCfg.retentionDays,
+    retentionDeleteCloud: localCfg.retentionDeleteCloud,
+  })
 }
 
 function saveNotifSettings() {

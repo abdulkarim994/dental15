@@ -50,6 +50,16 @@ const routes = [
         name: 'archive',
         component: () => import('@/modules/archive/ArchiveTab.vue'),
       },
+      {
+        path: 'queue',
+        name: 'queue',
+        component: () => import('@/modules/queue/QueueClinicSelect.vue'),
+      },
+      {
+        path: 'queue/:clinic',
+        name: 'queue-view',
+        component: () => import('@/modules/queue/QueueView.vue'),
+      },
       // Legacy redirects — preserve old bookmarks / deep links
       { path: 'add', redirect: '/home' },
       { path: 'records', redirect: '/clinics' },

@@ -149,6 +149,8 @@ import IconHome from '@/components/icons/IconHome.vue'
 import IconClinics from '@/components/icons/IconClinics.vue'
 import IconFinance from '@/components/icons/IconFinance.vue'
 import IconCalendar from '@/components/icons/IconCalendar.vue'
+import IconQueue from '@/components/icons/IconQueue.vue'
+import { useQueueStore } from '@/stores/queue.store'
 import { defineAsyncComponent } from 'vue'
 import SyncOverlay from '@/components/SyncOverlay.vue'
 import { pendingUploadCount } from '@/services/image.service'
@@ -164,18 +166,30 @@ const syncSt = useSyncStore()
 const { toast } = useToast()
 const { initTheme } = useTheme()
 
-const tabs = [
-  { id: 'home', label: 'الرئيسية', icon: IconHome },
-  { id: 'clinics', label: 'السجلات', icon: IconClinics },
-  { id: 'finance', label: 'المالية', icon: IconFinance },
-  { id: 'calendar', label: 'الجدول', icon: IconCalendar },
-]
+const queueSt = useQueueStore()
+
+const bookingType = computed(() => appStore.config?.bookingType || 'traditional')
+
+const tabs = computed(() => {
+  const base = [
+    { id: 'home', label: 'الرئيسية', icon: IconHome },
+    { id: 'clinics', label: 'السجلات', icon: IconClinics },
+    { id: 'finance', label: 'المالية', icon: IconFinance },
+  ]
+  if (bookingType.value === 'queue') {
+    base.push({ id: 'queue', label: 'الحجوزات', icon: IconQueue })
+  } else {
+    base.push({ id: 'calendar', label: 'الجدول', icon: IconCalendar })
+  }
+  return base
+})
 
 const activeTab = computed(() => route.name || 'home')
 function isTabActive(tabId) {
   const name = route.name || 'home'
   if (tabId === 'clinics') return ['clinics', 'clinic-patients', 'patient-profile', 'archive'].includes(name)
   if (tabId === 'finance') return ['finance'].includes(name)
+  if (tabId === 'queue') return ['queue', 'queue-view'].includes(name)
   return name === tabId
 }
 const selectedMonth = computed(() => appStore.selectedMonth)
@@ -313,7 +327,7 @@ async function _exitApp() {
 }
 
 /* ── Swipe between tabs ── */
-const tabIds = tabs.map(t => t.id)
+const tabIds = computed(() => tabs.value.map(t => t.id))
 let _swipeStartX = 0
 let _swipeStartY = 0
 let _swiping = false
@@ -338,12 +352,12 @@ function onSwipeEnd(e) {
   const endX = e.changedTouches[0].clientX
   const dx = endX - _swipeStartX
   if (Math.abs(dx) < 60) return
-  const currentIdx = tabIds.indexOf(route.name || 'home')
+  const currentIdx = tabIds.value.indexOf(route.name || 'home')
   if (currentIdx < 0) return
   // RTL: swipe left (dx < 0) = next tab, swipe right (dx > 0) = prev tab
   const nextIdx = dx < 0 ? currentIdx + 1 : currentIdx - 1
-  if (nextIdx < 0 || nextIdx >= tabIds.length) return
-  goTab(tabIds[nextIdx])
+  if (nextIdx < 0 || nextIdx >= tabIds.value.length) return
+  goTab(tabIds.value[nextIdx])
 }
 
 onMounted(() => {

@@ -327,7 +327,7 @@ async function _exitApp() {
 }
 
 /* ── Swipe between tabs ── */
-const tabIds = tabs.map(t => t.id)
+const tabIds = computed(() => tabs.value.map(t => t.id))
 let _swipeStartX = 0
 let _swipeStartY = 0
 let _swiping = false
@@ -352,12 +352,12 @@ function onSwipeEnd(e) {
   const endX = e.changedTouches[0].clientX
   const dx = endX - _swipeStartX
   if (Math.abs(dx) < 60) return
-  const currentIdx = tabIds.indexOf(route.name || 'home')
+  const currentIdx = tabIds.value.indexOf(route.name || 'home')
   if (currentIdx < 0) return
   // RTL: swipe left (dx < 0) = next tab, swipe right (dx > 0) = prev tab
   const nextIdx = dx < 0 ? currentIdx + 1 : currentIdx - 1
-  if (nextIdx < 0 || nextIdx >= tabIds.length) return
-  goTab(tabIds[nextIdx])
+  if (nextIdx < 0 || nextIdx >= tabIds.value.length) return
+  goTab(tabIds.value[nextIdx])
 }
 
 onMounted(() => {

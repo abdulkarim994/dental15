@@ -8,6 +8,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth.store'
 import { useAppStore } from '@/stores/app.store'
+import { useQueueStore } from '@/stores/queue.store'
 import { useTheme } from '@/composables/useTheme'
 import { restoreSessionFromSecureStorage } from '@/services/auth.service'
 import { enableAuthGuard } from '@/router'
@@ -18,6 +19,7 @@ import ToastNotification from '@/components/ToastNotification.vue'
 const router = useRouter()
 const authStore = useAuthStore()
 const appStore = useAppStore()
+const queueStore = useQueueStore()
 const { initTheme } = useTheme()
 
 async function ensureCleanData(uid) {
@@ -73,6 +75,7 @@ onMounted(async () => {
       // first paint of the home screen is never blocked.
       await ensureCleanData(authStore.uid)
       await appStore.loadFromCacheAsync(authStore.uid)
+      queueStore.loadFromCache(authStore.uid)
       router.push({ name: 'home' })
       setTimeout(() => {
         startUploadQueueListener()
@@ -104,6 +107,7 @@ onMounted(async () => {
       authStore.uid = session.user.id
       await ensureCleanData(session.user.id)
       await appStore.loadFromCacheAsync(session.user.id)
+      queueStore.loadFromCache(session.user.id)
       enableAuthGuard()
       router.push({ name: 'home' })
       setTimeout(() => {

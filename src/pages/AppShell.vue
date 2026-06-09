@@ -149,6 +149,8 @@ import IconHome from '@/components/icons/IconHome.vue'
 import IconClinics from '@/components/icons/IconClinics.vue'
 import IconFinance from '@/components/icons/IconFinance.vue'
 import IconCalendar from '@/components/icons/IconCalendar.vue'
+import IconQueue from '@/components/icons/IconQueue.vue'
+import { useQueueStore } from '@/stores/queue.store'
 import { defineAsyncComponent } from 'vue'
 import SyncOverlay from '@/components/SyncOverlay.vue'
 import { pendingUploadCount } from '@/services/image.service'
@@ -164,18 +166,30 @@ const syncSt = useSyncStore()
 const { toast } = useToast()
 const { initTheme } = useTheme()
 
-const tabs = [
-  { id: 'home', label: 'الرئيسية', icon: IconHome },
-  { id: 'clinics', label: 'السجلات', icon: IconClinics },
-  { id: 'finance', label: 'المالية', icon: IconFinance },
-  { id: 'calendar', label: 'الجدول', icon: IconCalendar },
-]
+const queueSt = useQueueStore()
+
+const bookingType = computed(() => appStore.config?.bookingType || 'traditional')
+
+const tabs = computed(() => {
+  const base = [
+    { id: 'home', label: 'الرئيسية', icon: IconHome },
+    { id: 'clinics', label: 'السجلات', icon: IconClinics },
+    { id: 'finance', label: 'المالية', icon: IconFinance },
+  ]
+  if (bookingType.value === 'queue') {
+    base.push({ id: 'queue', label: 'الحجوزات', icon: IconQueue })
+  } else {
+    base.push({ id: 'calendar', label: 'الجدول', icon: IconCalendar })
+  }
+  return base
+})
 
 const activeTab = computed(() => route.name || 'home')
 function isTabActive(tabId) {
   const name = route.name || 'home'
   if (tabId === 'clinics') return ['clinics', 'clinic-patients', 'patient-profile', 'archive'].includes(name)
   if (tabId === 'finance') return ['finance'].includes(name)
+  if (tabId === 'queue') return ['queue', 'queue-view'].includes(name)
   return name === tabId
 }
 const selectedMonth = computed(() => appStore.selectedMonth)

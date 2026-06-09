@@ -53,7 +53,7 @@
     </button>
 
     <!-- Queue table -->
-    <div v-if="queueStore.filteredEntries.length" class="space-y-2">
+    <div v-if="queueStore.filteredEntries.length" class="space-y-3">
       <div
         v-for="(entry, idx) in queueStore.filteredEntries"
         :key="entry.id"
@@ -68,61 +68,65 @@
         @touchmove.prevent="onTouchMove($event)"
         @touchend="onTouchEnd"
       >
-        <div class="p-3">
-          <!-- Row 1: Number + Name + Status -->
-          <div class="flex items-center gap-3 mb-2">
+        <div class="px-4 py-3">
+          <!-- Row 1: Number + Name + Status + 3-dot menu -->
+          <div class="flex items-center gap-3">
             <span
-              class="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-black flex-shrink-0"
+              class="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl font-black flex-shrink-0"
               :style="{ background: entry.status === 'new' ? 'rgba(59,130,246,.12)' : 'rgba(45,212,160,.12)', color: entry.status === 'new' ? 'var(--gold)' : 'var(--green)' }"
             >{{ entry.queue_order }}</span>
             <div class="flex-1 min-w-0">
-              <div class="font-bold text-sm truncate">{{ entry.patient_name }}</div>
-              <div class="flex items-center gap-2 mt-0.5">
+              <div class="font-bold text-lg leading-tight truncate">{{ entry.patient_name }}</div>
+              <div class="flex items-center gap-2 mt-1">
                 <span
-                  class="text-[9px] px-2 py-0.5 rounded-full font-bold"
+                  class="text-[10px] px-2.5 py-0.5 rounded-full font-bold"
                   :style="{ background: entry.status === 'new' ? 'rgba(59,130,246,.12)' : 'rgba(45,212,160,.12)', color: entry.status === 'new' ? '#60A5FA' : '#2dd4a0' }"
                 >{{ entry.status === 'new' ? 'جديد' : 'مراجعة' }}</span>
-                <span class="text-[9px] opacity-40">{{ entry.expected_time }}</span>
+                <span class="text-[11px] opacity-40">{{ entry.expected_time }}</span>
+                <button v-if="entry.notes" class="opacity-50 hover:opacity-100 transition-opacity" @click="showNotes(entry)" title="ملاحظات">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </button>
               </div>
             </div>
-            <!-- Notes icon -->
-            <button v-if="entry.notes" class="glass-sm w-8 h-8 flex items-center justify-center flex-shrink-0" @click="showNotes(entry)" title="ملاحظات">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-            </button>
+            <!-- 3-dot menu -->
+            <div class="relative flex-shrink-0">
+              <button class="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-white/5 transition-colors" @click="toggleMenu(entry.id)">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" opacity=".5"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg>
+              </button>
+              <!-- Dropdown menu -->
+              <div v-if="openMenuId === entry.id" class="absolute left-0 top-full mt-1 z-50 glass rounded-xl overflow-hidden shadow-lg min-w-[140px]" style="border:1px solid rgba(255,255,255,.08)">
+                <button class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors" @click="menuAction('edit', entry)">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--gold-l)" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+                  <span>تعديل</span>
+                </button>
+                <button class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors" @click="menuAction('skip', entry)">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
+                  <span>تخطي</span>
+                </button>
+                <button class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors" style="color:#2dd4a0" @click="menuAction('complete', entry)">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#2dd4a0" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  <span>تم الدخول</span>
+                </button>
+                <button class="w-full flex items-center gap-2.5 px-4 py-2.5 text-xs hover:bg-white/5 transition-colors" style="color:#ff4455" @click="menuAction('delete', entry)">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#ff4455" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                  <span>حذف</span>
+                </button>
+              </div>
+            </div>
           </div>
 
-          <!-- Row 2: Phone actions + control buttons -->
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-1">
-              <!-- Call -->
-              <a v-if="entry.phone" :href="'tel:' + entry.phone" class="glass-sm w-8 h-8 flex items-center justify-center" title="اتصال">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+          <!-- Row 2: Phone + call actions -->
+          <div v-if="entry.phone" class="flex items-center gap-3 mt-3 pt-3" style="border-top:1px solid rgba(255,255,255,.06)">
+            <a :href="'tel:' + entry.phone" class="text-base font-bold tracking-wide opacity-80 hover:opacity-100 transition-opacity" dir="ltr">{{ entry.phone }}</a>
+            <div class="flex items-center gap-1.5 mr-auto">
+              <a :href="'tel:' + entry.phone" class="w-9 h-9 rounded-xl flex items-center justify-center transition-colors" style="background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.2)" title="اتصال">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
               </a>
-              <!-- WhatsApp -->
-              <a v-if="entry.phone" :href="waLink(entry)" target="_blank" class="glass-sm w-8 h-8 flex items-center justify-center" title="واتساب">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+              <a :href="waLink(entry)" target="_blank" class="w-9 h-9 rounded-xl flex items-center justify-center transition-colors" style="background:rgba(37,211,102,.08);border:1px solid rgba(37,211,102,.2)" title="واتساب">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="#25D366"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
               </a>
-              <!-- Send ready message -->
-              <button v-if="entry.phone" class="glass-sm w-8 h-8 flex items-center justify-center" @click="sendReadyMsg(entry)" title="إرسال رسالة جاهزة">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-              </button>
-            </div>
-            <div class="flex items-center gap-1">
-              <!-- Edit -->
-              <button class="glass-sm w-8 h-8 flex items-center justify-center" @click="openEditModal(entry)" title="تعديل">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="var(--gold-l)" stroke-width="2" stroke-linecap="round"><path d="M17 3a2.828 2.828 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-              </button>
-              <!-- Skip -->
-              <button class="glass-sm w-8 h-8 flex items-center justify-center" @click="skipPatient(entry.id)" title="تخطي">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg>
-              </button>
-              <!-- Complete -->
-              <button class="glass-sm w-8 h-8 flex items-center justify-center" @click="completePatient(entry.id)" title="تم الدخول" style="background:rgba(45,212,160,.1);border-color:rgba(45,212,160,.3)">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#2dd4a0" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
-              </button>
-              <!-- Delete -->
-              <button class="glass-sm w-8 h-8 flex items-center justify-center" @click="deletePatient(entry.id)" title="حذف" style="background:rgba(255,68,85,.06);border-color:rgba(255,68,85,.2)">
-                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="#ff4455" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+              <button class="w-9 h-9 rounded-xl flex items-center justify-center transition-colors" style="background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2)" @click="sendReadyMsg(entry)" title="رسالة جاهزة">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               </button>
             </div>
           </div>
@@ -195,7 +199,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQueueStore } from '@/stores/queue.store'
 import { useAuthStore } from '@/stores/auth.store'
@@ -218,6 +222,7 @@ const showModal = ref(false)
 const editingEntry = ref(null)
 const notesPopup = ref(null)
 const nameInput = ref(null)
+const openMenuId = ref(null)
 
 const form = ref({
   patient_name: '',
@@ -233,6 +238,27 @@ const formattedDate = computed(() => {
   const parts = d.split('-')
   return `${parts[2]}/${parts[1]}/${parts[0]}`
 })
+
+// ─── 3-dot menu ───
+function toggleMenu(id) {
+  openMenuId.value = openMenuId.value === id ? null : id
+}
+
+function menuAction(action, entry) {
+  openMenuId.value = null
+  switch (action) {
+    case 'edit': openEditModal(entry); break
+    case 'skip': skipPatient(entry.id); break
+    case 'complete': completePatient(entry.id); break
+    case 'delete': deletePatient(entry.id); break
+  }
+}
+
+function closeMenuOnClick(e) {
+  if (openMenuId.value && !e.target.closest('.relative')) {
+    openMenuId.value = null
+  }
+}
 
 // ─── Drag & Drop ───
 const draggedId = ref(null)
@@ -383,6 +409,10 @@ function goBack() {
 function _persist() {
   if (authStore.uid) queueStore.saveToCache(authStore.uid)
 }
+
+// Close menu on outside click
+onMounted(() => document.addEventListener('click', closeMenuOnClick))
+onUnmounted(() => document.removeEventListener('click', closeMenuOnClick))
 
 // Auto-save on changes
 watch(() => queueStore.entries, () => _persist(), { deep: true })

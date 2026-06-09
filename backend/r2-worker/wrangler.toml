@@ -1,0 +1,17 @@
+# Cloudflare Worker config — مرجعي للمرحلة 3 (لا يؤثر على بناء التطبيق)
+name = "thelu-r2-worker"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# ربط حاوية R2 (أنشئها مرة واحدة: wrangler r2 bucket create thelu-xrays)
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "thelu-xrays"
+
+# الأصل المسموح به للـ CORS (ضع نطاق تطبيقك، أو احذفه للسماح بالكل)
+[vars]
+ALLOWED_ORIGIN = "*"
+
+# سرّ توقيع توكن Supabase — لا يوضع هنا، بل:
+#   wrangler secret put SUPABASE_JWT_SECRET
+# وقيمته من: Supabase Dashboard → Project Settings → API → JWT Secret

@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Capacitor / Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/local.properties
+android/app/release/
+*.apk
+*.aab
+
+# Logs & caches
+*.log
+.vite/
+.cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.local
